@@ -1,0 +1,368 @@
+---
+title: "Informe Riesgo Financiero"
+author: "Diego Figueroa"
+date: "18-01-2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# *Informe de Resultados*
+
+El siguiente informe entrega información relevante sobre activos de renta variable seleccionados al momento de, en primer lugar, analizar el comportamiento de sus retornos y, luego, su adhesión a un portafolio. 
+Se desarrollan simulaciones para evaluar este comportamiento, por sobre utilizar información histórica.
+Adicionalmente, se apoyará el análisis con los paquetes "quantmod", "corrplot" y "readxl"
+
+```{r,warning=FALSE,include=FALSE,message=FALSE,results=FALSE}
+library(quantmod)
+library(corrplot)
+library(readxl)
+```
+
+## Información Histórica Intel
+### Precio de la Acción y Distribución de retornos
+A partir de información histórica obtenida de la acción Intel, podemos visualizar que en la última década el comportamiento de su precio mantiene una fluctuación más pronunciada que la anterior, con una tendencia de ajuste hacia valores del 2018 (<US$40 dólares por acción).
+
+```{r,warning=FALSE, message=FALSE, echo=FALSE,fig.width=10, fig.height=4}
+# Importación datos desde Yahoo Finance
+INTEL <- getSymbols("INTC", auto.assign=FALSE, from="2001-10-31", src='yahoo') 
+# Evolución del Precio
+chartSeries(INTEL, name="INTEL price stock", theme=chartTheme('white'), bar.type="hlc",up.col="white",dn.col="red",subset="last 20 years", TA=list(addMACD(), addVo()),fig.dim = c(2, 4)) # Los siguientes complementos pueden ser integradas en una list() dentro del parámetro TA, para generar un gráfico completo. Si hago las opciones por separado, obtengo una serie de gráficos, donde se van agregando progresivamente cada opción. 
+#addEMA(n=20, col=2)
+#addEMA(n=5, col = 4)
+
+
+
+```
+
+```{r,warning=FALSE, message=FALSE, echo=FALSE,results=FALSE,include=FALSE}
+# Importación datos desde Yahoo Finance
+myTheme <- chart_theme()
+myTheme$col$dn.col <- "red"
+myTheme$col$dn.border <- "red"
+myTheme$col$up.col <- "green"
+myTheme$col$up.border <- "green"
+myTheme$rylab <- TRUE
+myTheme$lylab <- FALSE
+chart_Series(INTEL, theme = myTheme)
+
+```
+ \pagebreak
+Por otro lado, al evaluar sus retornos en el período en cuestión, se observa una distribución de forma gaussiana aunque con extremos más amplios, mostrando la gran fluctuación en el precio mencionado anteriormente.
+Se recomienda evaluar el comportamiento a partir de un análisis de kurtosis y skewness, y uno de normal con un prueba de Jarque-Bera concluir normalidad. En esta ocasión se omite dicho análisis, y asumiremos un comportamiento
+normal de la distribución.
+
+```{r,warning=FALSE,include=FALSE,message=FALSE}
+# Creación del retorno de Intel
+INTEL_rt <- diff(log(as.numeric(INTEL[,6])))
+# Histograma de los retornos
+hist(INTEL_rt, col='blue', breaks = 40, main='Intel')
+```
+
+### VaR No paramétrico para 1 día
+
+En condiciones normales de mercado, si mantengo $1.000.000 en una posición de Intel, al 99% de 
+confianza, lo más que puedo perder en un día son $ 46.952 aproximadamente.
+```{r, message=FALSE, warning=FALSE, results=FALSE}
+quantile(INTEL_rt, probs = 0.01) * 1000000
+```
+
+### VaR No paramétrico para 5 días
+
+En condiciones normales de mercado, si mantengo $1.000.000 en una posición de Intel, al 99% de 
+confianza lo más que puedo perder en cinco días son $ 104.987 aproximadamente.
+
+```{r, message=FALSE, warning=FALSE, results=FALSE}
+# Por metodo de datos historicos:
+quantile(INTEL_rt, probs = 0.01) *sqrt(5) * 1000000
+
+```
+
+### VaR paramétrico 
+
+En condiciones normales de mercado, y asumiendo que el comportamiento de los retornos distribuye normal,
+si tengo $1.000.000 en una posición de Intel, al 99% de confianza lo más que puedo perder en cinco días son $ 94.275 aproximadamente.
+```{r, message=FALSE, warning=FALSE, results=FALSE}
+# Por método paramétrico:
+-2.33*sd(INTEL_rt)*sqrt(5)*1000000
+```
+
+### VaR por medio de simulación Monte Carlo
+
+Asumiendo 250 días hábiles, que corresponde a un horizonte de un año de actividad en la industria financiera, se realizan 1000 simulaciones mediante el método MonteCarlo.
+Estas se pueden observar en el siguiente gráfico.
+
+```{r, message=FALSE, warning=FALSE, results=FALSE}
+# Simulación Monte Carlo
+
+m <- 250 # horizonte de un año, 250 días hábiles
+mu <- mean(INTEL_rt)
+n <- 1000    # número de simulaciones
+sigma <- var(INTEL_rt)^0.5
+
+INTEL_SIM_UNDIA <- matrix(0, nrow = n, ncol = m)
+INTEL_SIM_UNDIA[,1]<-INTEL[length(INTEL[,6]),6]
+
+for (i in 1:n){
+  for (j in 1:(m-1)){
+    INTEL_SIM_UNDIA[i,j+1] = INTEL_SIM_UNDIA[i,j]*exp((mu-0.5*sigma^2)+sigma*rnorm(1))
+  }
+}
+
+```
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE, fig.width=10, fig.height=8}
+# Gráfico
+
+maximo = max(INTEL_SIM_UNDIA[,])
+minimo = min(INTEL_SIM_UNDIA[,])
+
+plot(c(1,250),c(minimo-10,maximo +10),  ylab = 'Intel', xlab = 'Número de Días', main="Simulaciones precios acción Intel")
+
+for (i in 1:1000){
+  lines (INTEL_SIM_UNDIA[i,], col = i, lwd='0.1')
+}
+```
+
+#### VaR de 1 día
+
+En condiciones normales de mercado, si mantengo $1.000.000 en una posición de Intel, al 99% de confianza lo más que puedo perder en un día son $ 41.000 aproximadamente.
+
+```{r, message=FALSE, warning=FALSE, results=FALSE}
+# Cálculo VaR de las simulaciones
+INTEL_SIM_UNDIA_2 <- matrix(0, nrow = n, ncol = m-1)
+for (i in 1:n){
+  for(j in 1:(m-1))
+  {
+    INTEL_SIM_UNDIA_2[i,j] = log(INTEL_SIM_UNDIA[i,j+1])-log(INTEL_SIM_UNDIA[i,j])
+  }
+}
+quantile(INTEL_SIM_UNDIA_2, probs =0.01) *1000000 # Estimación VaR de la simulación
+```
+
+
+
+##### VaR a 5 días
+
+###### Asumiendo distribución Normal
+
+En condiciones normales de mercado, si tengo $1.000.000 en una posición de Intel, al 99% de 
+confianza lo más que puedo perder en cinco días son $ 94.000 aproximadamente.
+
+```{r, message=FALSE, warning=FALSE, results=FALSE}
+# Asumiendo que la rentabilidad se distribuye normal (método más recomendado por nosotros)
+-2.33*sd(INTEL_SIM_UNDIA_2)*sqrt(5)*1000000
+```
+
+
+\pagebreak
+
+## Información histórica varias acciones
+### Precio de la Acción y Distribución de retornos
+
+Se obtuvo información histórica de activos de renta variable relacionada a las siguientes empresas:
+* Apple
+* Índice S&P500
+* Bank of America
+* Intel
+ 
+ Con ellas se buscan la conformación de un portafolio de inversión
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE,include=FALSE}
+apple <- getSymbols ("AAPL", auto.assign = FALSE, from="2011-01-18",src="yahoo")
+sp500<-getSymbols ("^GSPC", auto.assign = FALSE, from="2011-01-18",src="yahoo")
+bankam<-getSymbols ("BAC", auto.assign = FALSE, from="2011-01-18",src="yahoo")
+intel<-getSymbols ("INTC", auto.assign = FALSE, from="2011-01-18",src="yahoo")
+```
+
+
+El comportamiento de las acciones que presentan mayores volatilidades resultan ser *Bank of America* e *Intel*, durante el período observado.
+Sin embargo, en todos los casos existe una fuerte tendencia al alza, destacando el caso de *Apple* y el índice *S&P500*
+
+```{r,warning=FALSE, message=FALSE, echo=FALSE}
+par(mfrow=c(2,2))
+chart_Series(apple)
+chart_Series(sp500)
+chart_Series(bankam)
+chart_Series(intel)
+```
+
+\pagebreak
+
+Se puede observar un comportamiento de los rendimientos bastante semejantes a como la haría una distribución Gaussiana, encontrando razonable el supuesto de Normalidad.
+Mencionar los casos de *Apple* y el índice *S&P500* con retornos menos extremos (tanto postivos como negativos), alcanzando caídas máximas cercanas a 15% o 10%, respectivamente.
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+apple_rt<-diff(log(as.numeric(apple[,6])))
+sp500_rt<-diff(log(as.numeric(sp500[,6])))
+bankam_rt<-diff(log(as.numeric(bankam[,6])))
+intel_rt<-diff(log(as.numeric(intel[,6])))
+
+par(mfrow=c(2,2))
+  hist(apple_rt,nclass = 50, col="orange",main="Distribución de Retornos Apple Inc.", xlab="Retorno %")  
+  hist(sp500_rt,nclass = 50, col="green",main="Distribución de Retornos S&P 500",xlab="Retorno %")
+  hist(bankam_rt,nclass = 50, col="red",main="Distribución de Retornos Bank of America",xlab="Retorno %")
+  hist(intel_rt,nclass = 50, col="royalblue",main="Distribución de Retornos Intel",xlab="Retorno %")
+  
+```
+
+
+### Matriz de Covarianza
+
+A continuación se presenta la matriz de covarianza
+
+```{r, message=FALSE, warning=FALSE, results=FALSE,echo=FALSE}
+portafolio<- cbind(intel_rt,bankam_rt,sp500_rt,apple_rt)
+colnames(portafolio)=c("Intel", "Bankam", "S&P500", "Apple")
+head(portafolio)
+```
+
+```{r, echo=FALSE,message=FALSE, warning=FALSE,echo=FALSE }
+par(mfrow=c(1,1))
+cov(portafolio)
+```
+
+### Matriz de Correlación
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE, fig.align='center',fig.width=6,fig.height=6}
+corrplot(cor(portafolio),type="upper", tl.col="dark red", method="number")
+```
+
+Mediante el método de correlación de Pearson, en la matriz gráfica se observan altas correlaciones esperables entre el índice *S&P 500* con el resto de activos.
+Esto se debe a que el índice está compuesto por las 500 empresas de mayor capitalización en EEUU, en donde están agregadas el resto (con algunas variaciones en el tiempo).
+Además, la correlación entre el resto de activos es positiva, aunque con menores valores, lo que podría afectar resultados positivos consistentes en el futuro, ya que están poco diversificados los activos.
+Esto se observará en la distribución de rentabilidades históricas del portafolio en la siguiente sección.
+
+\pagebreak
+
+### VaR no paramétrico de 1 día
+
+Se evalúa el portafolio, asignando igual porcentaje de capital en cada activo invertido. A continuación se observa el retorno histórico del portafolio y su distribución:
+Se observa una distribución semejante a una gaussiana, sin embargo, mantiene extremos muy marcados, con caídas por sobre el 20%, lo que repercuté en su volatilidad promedio histórica del portafolio.
+
+```{r, message=FALSE, warning=FALSE, results=FALSE,echo=FALSE, fig.width=8, fig.height=6}
+retorno_historico <- vector(mode="numeric",length= length(portafolio)) 
+# Creo un vector en 0, al cual iré rellenando con información histórica
+head(retorno_historico)
+
+for(i in 1:length(portafolio)){
+  retorno_historico[i]= mean(portafolio[i])
+}
+
+head(retorno_historico)
+```
+
+```{r, message=FALSE, warning=FALSE,echo=FALSE, fig.width=8, fig.height=6}
+hist(retorno_historico,nclass=60, col="royalblue",main="Distribución de Retornos Portafolio Histórico", xlab="Retorno %")
+```
+
+El cálculo del Value at Risk para uno día, a partir de datos históricos (no paramétrico), obtiene que a un 99% de confianza,la pérdida máxima asumida de un portafolio de $1.000.000 sería de USD$ 50.562,2 dólares en un día. 
+Adicionalmente, se obtiene que a un 95% de confianza,la pérdida máxima asumida de un portafolio de $1.000.000 sería de USD$ 25.697,3 dólares en un día.
+
+```{r}
+quantile(retorno_historico,probs =0.01 )*1000000 
+
+quantile(retorno_historico,probs =0.05 )*1000000 
+```
+
+
+### VaR paramétrico
+
+#### VaR utilizando estimación de varianza constante para 1 día
+
+Para el caso del modelo paramétrico de 1 día. Asumimos normalidad en función de la distribución de retornos del portafolio observado. 
+Se obtiene que a un 95% de confianza,la pérdida máxima asumida de un portafolio de \$\" "1.000.000,
+sería de USD$ 22.598,1 dólares en un día, por medio de un modelo paramétrico
+
+```{r, message=FALSE, warning=FALSE,include=FALSE}
+portafolio<- cbind(intel_rt,bankam_rt,sp500_rt,apple_rt)
+head(portafolio)
+
+portafolio_mx_cov<-cov(portafolio)
+
+lambda_portafolio <- matrix(0.25,nrow=4, ncol=1)
+
+portafolio_mu <- mean(portafolio)
+
+portafolio_sigma<-t(lambda_portafolio)%*%portafolio_mx_cov%*%lambda_portafolio
+
+-(-portafolio_mu+qnorm(0.95)*sqrt(portafolio_sigma))*1000000
+
+```
+
+### VaR utilizando 300 simulaciones: 
+
+Al realizar 300 simulaciones de precios para calcular VaR a un día, utilizamos el método de la matriz de Cholesky para descomprimir la matriz de covarianza
+```{r, message=FALSE, warning=FALSE,include}
+
+n<-300
+portafolio_mx_cov<-cov(portafolio)
+betha <- matrix(0,nrow=4, ncol=n)
+for(i in 1:2){
+  for(j in 1:(n)){
+    betha[i,j]=rnorm(1,mean=0,sd=1)
+  }
+}
+
+cholesky<-chol(portafolio_mx_cov)
+vector<-t(cholesky)%*%betha
+```
+
+Luego, calculamos el tamaño de los datos, la media, la desviación estándar y el factor de integración al portafolio
+```{r, message=FALSE, warning=FALSE, include=FALSE}
+# Números aleatorios correlacionados
+s0_intel<-as.numeric(apple[length(intel[,6]),6])
+mu_intel<-mean(intel_rt)
+sigma_intel<-portafolio_mx_cov[1,1]
+ST_intel<-s0_intel*exp(mu_intel-0.5*sigma_intel^2+vector[1,])
+
+s0_bankam<-as.numeric(bankam[length(bankam[,6]),6])
+mu_bankam<-mean(bankam_rt)
+sigma_bankam<-portafolio_mx_cov[2,2]
+ST_bankam<-s0_bankam*exp(mu_bankam-0.5*sigma_bankam^2+vector[2,])
+
+s0_sp500<-as.numeric(sp500[length(sp500[,6]),6])
+mu_sp500<-mean(sp500_rt)
+sigma_sp500<-portafolio_mx_cov[3,3]
+ST_sp500<-s0_sp500*exp(mu_sp500-0.5*sigma_sp500^2+vector[3,])
+
+s0_apple<-as.numeric(apple[length(apple[,6]),6])
+mu_apple<-mean(apple_rt)
+sigma_apple<-portafolio_mx_cov[4,4]
+ST_apple<-s0_apple*exp(mu_apple-0.5*sigma_apple^2+vector[4,])
+
+```
+
+
+
+```{r, message=FALSE, warning=FALSE,include=FALSE,error=FALSE,echo=TRUE}
+retorno_simulado<-c(log(ST_intel/s0_intel),log(ST_bankam/s0_bankam),log(ST_sp500/s0_sp500),log(ST_apple/s0_apple))
+
+par(mfrow=c(2,2))
+hist(log(ST_intel/s0_intel))
+hist(log(ST_bankam/s0_bankam))
+hist(log(ST_sp500/s0_sp500))
+hist(log(ST_apple/s0_apple))
+
+quantile(log(ST_intel/s0_intel), probs=0.05)*1000000
+quantile(log(ST_bankam/s0_bankam), probs=0.05)*1000000
+quantile(log(ST_sp500/s0_sp500), probs=0.05)*1000000
+quantile(log(ST_apple/s0_apple), probs=0.05)*1000000
+
+rt_simul2 <- matrix(0,nrow= length(retorno_simulado), ncol=1)
+for (i in 1:length(retorno_simulado)){
+  rt_simul2[i]<-mean(retorno_simulado[i])
+}
+
+quantile(rt_simul2, probs=0.01)*1000000
+```
+  
+Se obtiene que a un 95% de confianza,la pérdida máxima asumida de un portafolio de $1.000.000 sería de USD$ 32069.8 dólares en un día, por medio de un modelo de simulación, proveniente de la acción Intel.
+ 
+Se obtiene que a un 95% de confianza,la pérdida máxima asumida de un portafolio de $1.000.000 sería de USD$ 40109.1 dólares en un día, por medio de un modelo de simulación, proveniente de la acción de Bank of America.
+ 
+Se obtiene que a un 95% de confianza,la pérdida máxima asumida de un portafolio de USD$ $1.000.000 sería de USD$ 16445.1 dólares en un día, por medio de un modelo de simulación, proveniente del índice S&P 500.
+ 
+Se obtiene que a un 95% de confianza,la pérdida máxima asumida de un portafolio de USD$ $1.000.000 sería de USD$ 15784.1  dólares en un día, por medio de un modelo de simulación, proveniente de la acción de Apple 
